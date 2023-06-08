@@ -31,15 +31,19 @@ type
     cx: float
     cy: float
     hullStart: int
+    trianglesLen: int
 
 proc update(this: Delaunator)
+func hashKey(this: Delaunator, x, y: int): int
+proc addTriangle(this: Delaunator, i0, i1, i2, a, b, c: int): int
+proc link(this: Delaunator, a, b: int)
+
 func dist(ax, ay, bx, by: float): float
 func circumradius(ax, ay, bx, by, cx, cy: float): float
 func circumcenter(ax,  ay,  bx,  by,  cx,  cy: float): Vector
 func quicksort(ids: var seq[uint32], dists: var seq[float64], left, right: int)
 func swap[T: SomeNumber](arr: var seq[T], i, j: int)
 proc fill[T](arr: seq[T], val: T)
-func hashKey(this: Delaunator, x, y: int): int
 
 proc newDelaunator*[T: Vector](coords: seq[T]): Delaunator[T] =
   let n = coords.len shl 1
@@ -203,7 +207,37 @@ proc update(this: Delaunator) =
   this.hullHash[this.hashKey(i1x, i1y)] = i1
   this.hullHash[this.hashKey(i2x, i2y)] = i2
 
-  this.triangles.setLen(0)
+  this.trianglesLen = 0
+  this.addTriangle(i0, i1, i2, -1, -1, -1)
+
+  var xp, yp: int
+  for k in 0 ..< this.ids.len:
+    let
+      i = this.ids[k]
+      x = this.coords[2 * i]
+      y = this.coords[2 * i + 1]
+
+    if k > 0 and abs(x - xp) <= EPSILON and abs(y - yp) <= EPSILON:
+      continue
+
+proc link(this: Delaunator, a, b: int) =
+  this.halfEdges[a] = b
+  if b != -1:
+    this.halfEdges[b] = a
+
+proc addTriangle(this: Delaunator, i0, i1, i2, a, b, c: int): int =
+  ## Add a new triangle given vertex indices and adjacent half-edge ids
+  result = this.trianglesLen
+
+  this.triangles[result] = i0
+  this.triangles[result + 1] = i1
+  this.triangles[result + 2] = i2
+
+  this.link(result, a)
+  this.link(result + 1, b)
+  this.link(result + 2, c)
+
+  this.trianglesLen += 3
 
 func dist(ax, ay, bx, by: float): float =
   let
