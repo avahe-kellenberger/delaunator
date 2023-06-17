@@ -17,7 +17,9 @@ type
     triangles: seq[uint32]
     halfEdges: seq[int32]
 
+
     # Temporary arrays for tracking the edges of the advancing convex hull
+    hull: seq[uint32]
     hashSize: int
     hullPrev: seq[uint32]
     hullNext: seq[uint32]
@@ -44,6 +46,13 @@ func circumcenter(ax,  ay,  bx,  by,  cx,  cy: float): Vector
 func quicksort(ids: var seq[uint32], dists: var seq[float64], left, right: int)
 func swap[T: SomeNumber](arr: var seq[T], i, j: int)
 proc fill[T](arr: seq[T], val: T)
+
+proc legalize(a: int): uint32
+
+template doWhile(a, b: untyped): untyped =
+  b
+  while a:
+    b
 
 proc newDelaunator*[T: Vector](coords: seq[T]): Delaunator[T] =
   let n = coords.len shl 1
@@ -188,7 +197,7 @@ proc update(this: Delaunator) =
 
   # Set up the seed triangle as the starting hull
   this.hullStart = i0
-  let hullSize = 3
+  var hullSize = 3
   
   this.hullNext[i0] = i1
   this.hullNext[i1] = i2
@@ -217,8 +226,103 @@ proc update(this: Delaunator) =
       x = this.coords[2 * i]
       y = this.coords[2 * i + 1]
 
+    # Skip seed triangle points
+    if i == i0 or i == i1 or i == i2:
+      continue
+
+    # Skip near-duplicate points
     if k > 0 and abs(x - xp) <= EPSILON and abs(y - yp) <= EPSILON:
       continue
+
+    xp = x
+    yp = y
+
+    # Find a visible edge on the convex hull using edge hash
+    var
+      start: int
+      key = this.hashKey(x, y)
+    for j in 0 ..< this.hashSize:
+      start = this.hullHash[(key + j) mod this.hashSize]
+      if start != -1 and start != this.hullNext[start]:
+        break
+    
+    start = this.hullPrev[start]
+
+    var
+      e = start
+      q = this.hullNext[e]
+
+    while true:
+      q = this.hullNext[e]
+      if orient2d(x, y, this.coords[2 * e], this.coords[2 * e + 1], this.coords[2 * q], this.coords[2 * q + 1]) < 0:
+        break
+      
+      e = q
+
+      if e == start:
+        e = -1
+        break
+
+    # Likely a near-duplicate point; skip it
+    if e == -1:
+      continue
+
+    # Add the first triangle from the point
+    var t = this.addTriangle(e, i, this.hullNext[e], -1, -1, this.hullTri[e])
+
+    # Recursively flip triangles from the point until they satisfy the Delaunay condition
+    this.hullTri[i] = this.legalize(t + 2)
+    # Keep track of boundary triangles on the hull
+    this.hullTri[e] = t
+    hullSize += 1
+
+    # Walk forward through the hull, adding more triangles and flipping recursively
+    var n = this.hullNext[e]
+    while true:
+      q = this.hullNext[n]
+      if orient2d(x, y, this.coords[2 * n], this.coords[2 * n + 1], this.coords[2 * q], this.coords[2 * q + 1]) >= 0:
+        break
+      
+      t = this.addTriangle(n, i, q, this.hullTri[i], -1, this.hullTri[n])
+      this.hullTri[i] = this.legalize(t + 2)
+      # Mark as removed
+      this.hullNext[n] = n
+      hullSize -= 1
+      n = q
+
+    # Walk backward from the other side, adding more triangles and flipping
+    if e == start:
+      while true:
+        q = this.hullPrev[e]
+        if orient2d(x, y, this.coords[2 * q], this.coords[2 * q + 1], this.coords[2 * e], this.coords[2 * e + 1]) >= 0:
+          break
+
+        t = this.addTriangle(q, i, e, -1, this.hullTri[e], this.hullTri[q])
+        discard this.legalize(t + 2)
+        this.hullTri[q] = t
+        # Mark as removed
+        this.hullNext[e] = e
+        hullSize -= 1
+        e = q
+
+    # Update the hull indices
+    this.hullStart = e
+    this.hullPrev[i] = e
+    this.hullNext[i] = n
+
+    # Save the two new edges in the hash table
+    this.hullHash[this.hashkey(x, y)] = i
+    this.hullHash[this.hashkey(this.coords[2 * e], this.coords[2 * e + 1])] = e
+
+  this.hull = newSeqOfCap[uint32](hullSize)
+  var e = this.hullStart
+  for i in 0 ..< hullSize:
+    this.hull[i] = e
+    e = this.hullNext[e]
+
+  # Trim typed triangle mesh arrays
+  this.triangles = this.triangles[0 .. this.trianglesLen]
+  this.halfEdges = this.halfEdges[0 .. this.trianglesLen]
 
 proc link(this: Delaunator, a, b: int) =
   this.halfEdges[a] = b
@@ -271,11 +375,6 @@ func circumcenter(ax,  ay,  bx,  by,  cx,  cy: float): Vector =
   let x = ax + (ey * bl - dy * cl) * d
   let y = ay + (dx * cl - ex * bl) * d
   return (x, y)
-
-template doWhile(a, b: untyped): untyped =
-  b
-  while a:
-    b
 
 func quicksort(ids: var seq[uint32], dists: var seq[float64], left, right: int) =
   if (right - left) <= 20:
@@ -340,4 +439,7 @@ func pseudoAngle(dx, dy: float): float =
 
 func hashKey(this: Delaunator, x, y: int): int =
   return int floor(pseudoAngle(x - this.cx, y - this.cy) * this.hashSize) mod this.hashSize
+
+proc legalize(a: int): uint32 =
+  discard
 
