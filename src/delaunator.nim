@@ -47,7 +47,7 @@ func quicksort(ids: var seq[uint32], dists: var seq[float64], left, right: int)
 func swap[T: SomeNumber](arr: var seq[T], i, j: int)
 proc fill[T](arr: seq[T], val: T)
 
-proc legalize(a: int): uint32
+proc legalize(this: Delaunator, a: int): uint32
 
 template doWhile(a, b: untyped): untyped =
   b
@@ -349,6 +349,22 @@ func dist(ax, ay, bx, by: float): float =
     dy = ay - by
   return dx * dx + dy * dy
 
+func inCircle(ax, ay, bx, by, cx, cy, px, py: float): bool =
+    let dx = ax - px
+    let dy = ay - py
+    let ex = bx - px
+    let ey = by - py
+    let fx = cx - px
+    let fy = cy - py
+
+    let ap = dx * dx + dy * dy
+    let bp = ex * ex + ey * ey
+    let cp = fx * fx + fy * fy
+
+    return dx * (ey * cp - bp * fy) -
+           dy * (ex * cp - bp * fx) +
+           ap * (ex * fy - ey * fx) < 0
+
 func circumradius(ax, ay, bx, by, cx, cy: float): float =
   let dx = bx - ax
   let dy = by - ay
@@ -440,6 +456,91 @@ func pseudoAngle(dx, dy: float): float =
 func hashKey(this: Delaunator, x, y: int): int =
   return int floor(pseudoAngle(x - this.cx, y - this.cy) * this.hashSize) mod this.hashSize
 
-proc legalize(a: int): uint32 =
-  discard
+proc legalize(this: Delaunator, a: int): uint32 =
+  var
+    i: int
+    ar: int
+
+  # Recursion eliminated with a fixed-size stack
+  while true:
+    let b = this.halfEdges[a]
+
+    # If the pair of triangles doesn't satisfy the Delaunay condition
+    # (p1 is inside the circumcircle of [p0, pl, pr]), flip them,
+    # then do the same check/flip recursively for the new pair of triangles
+    #
+    #          pl                    pl
+    #         /||\                  /  \
+    #      al/ || \bl            al/    \a
+    #       /  ||  \              /      \
+    #      /  a||b  \    flip    /___ar___\
+    #    p0\   ||   /p1   =>   p0\---bl---/p1
+    #       \  ||  /              \      /
+    #      ar\ || /br             b\    /br
+    #         \||/                  \  /
+    #          pr                    pr
+    #
+
+    let a0 = a - a mod 3
+    ar = a0 + (a + 2) mod 3
+
+    # Convex hull edge
+    if b == -1:
+      if i == 0:
+        break
+      a = EDGE_STACK[i]
+      i -= 1
+      continue
+    
+    let
+      b0 = b - b mod 3
+      al = a0 + (a + 1) mod 3
+      bl = b0 + (b + 2) mod 3
+
+    let
+      p0 = this.triangles[ar]
+      pr = this.triangles[a]
+      pl = this.triangles[al]
+      p1 = this.triangles[bl]
+
+    let illegal = inCircle(
+      this.coords[2 * p0], this.coords[2 * p0 + 1],
+      this.coords[2 * pr], this.coords[2 * pr + 1],
+      this.coords[2 * pl], this.coords[2 * pl + 1],
+      this.coords[2 * p1], this.coords[2 * p1 + 1]
+    )
+
+    if illegal:
+      this.triangles[a] = p1
+      this.triangles[b] = p0
+
+      let hbl = this.halfEdges[bl]
+
+      # Edge swapped on the other side of the hull (rare); fix the halfedge reference
+      if hbl == -1:
+        var e = this.hullStart
+        doWhile(e != this.hullStart):
+          if this.hullTri[e] == bl:
+            this.hullTri[e] = a
+            break
+          e = this.hullPrev[e]
+
+      this.link(a, hbl)
+      this.link(b, this.halfEdges[ar])
+      this.link(ar, bl)
+
+      let br = b0 + (b + 1) mod 3
+
+      # Don't worry about hitting the cap; it can only happen on extremely degenerate input
+      if i < len(EDGE_STACK):
+        EDGE_STACK[i] = br
+        i += 1
+
+    else:
+      if i == 0:
+        break
+      a = EDGE_STACK[i]
+      i -= 1
+
+  return ar
 
