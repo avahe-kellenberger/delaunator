@@ -3,79 +3,85 @@ import orient2d as orient2dModule
 
 const EPSILON = pow(2.0, -52.0)
 
-var EDGE_STACK: array[512, uint32]
+var EDGE_STACK: array[512, int]
 
 type
   Vector* = concept v
-    v.x is float
-    v.y is float
+    v[0] is float
+    v[1] is float
 
-  Delaunator*[T: Vector] = object
+  Delaunator*[T: SomeFloat] = object
     coords: seq[T]
 
     # Arrays that will store the triangulation graph
-    triangles: seq[uint32]
-    halfEdges: seq[int32]
+    triangles: seq[int]
+    halfEdges*: seq[int]
 
 
     # Temporary arrays for tracking the edges of the advancing convex hull
-    hull: seq[uint32]
+    hull: seq[int]
     hashSize: int
-    hullPrev: seq[uint32]
-    hullNext: seq[uint32]
-    hullTri: seq[uint32]
-    hullHash: seq[int32]
+    hullPrev: seq[int]
+    hullNext: seq[int]
+    hullTri: seq[int]
+    hullHash: seq[int]
 
     # Temporary arrays for sorting points
-    ids: seq[uint32]
-    dists: seq[float64]
+    ids: seq[int]
+    dists: seq[float]
 
     cx: float
     cy: float
     hullStart: int
     trianglesLen: int
 
-proc update(this: Delaunator)
-func hashKey(this: Delaunator, x, y: int): int
-proc addTriangle(this: Delaunator, i0, i1, i2, a, b, c: int): int
-proc link(this: Delaunator, a, b: int)
+proc update(this: var Delaunator)
+func hashKey(this: Delaunator, x, y: float): int
+proc addTriangle(this: var Delaunator, i0, i1, i2, a, b, c: int): int
+proc link(this: var Delaunator, a, b: int)
 
 func dist(ax, ay, bx, by: float): float
 func circumradius(ax, ay, bx, by, cx, cy: float): float
 func circumcenter(ax,  ay,  bx,  by,  cx,  cy: float): Vector
-func quicksort(ids: var seq[uint32], dists: var seq[float64], left, right: int)
+func quicksort(ids: var seq[int], dists: var seq[float], left, right: int)
 func swap[T: SomeNumber](arr: var seq[T], i, j: int)
-proc fill[T](arr: seq[T], val: T)
+proc fill[T](arr: var seq[T], val: T)
 
-proc legalize(this: Delaunator, a: int): uint32
+proc legalize(this: var Delaunator, val: int): int
 
 template doWhile(a, b: untyped): untyped =
   b
   while a:
     b
 
-proc newDelaunator*[T: Vector](coords: seq[T]): Delaunator[T] =
-  let n = coords.len shl 1
-  
+template x*(v: Vector): float =
+  v[0]
+
+template y*(v: Vector): float =
+  v[1]
+
+proc newDelaunator*[T: SomeFloat](coords: seq[T]): Delaunator[T] =
+  let n = coords.len shr 1
+
   result.coords = coords
 
   let maxTriangles = max(2 * n - 5, 0)
-  result.triangles = newSeqOfCap[uint32](maxTriangles * 3)
-  result.halfEdges = newSeqOfCap[int32](maxTriangles * 3)
+  result.triangles = newSeq[int](maxTriangles * 3)
+  result.halfEdges = newSeq[int](maxTriangles * 3)
 
-  result.hashSize = ceil(sqrt(n))
-  result.hullPrev = newSeqOfCap[uint32](n)
-  result.hullNext = newSeqOfCap[uint32](n)
-  result.hullTri = newSeqOfCap[uint32](n)
-  result.hullHash = newSeqOfCap[int32](result.hashSize)
+  result.hashSize = int ceil(sqrt(float n))
+  result.hullPrev = newSeq[int](n)
+  result.hullNext = newSeq[int](n)
+  result.hullTri = newSeq[int](n)
+  result.hullHash = newSeq[int](result.hashSize)
 
-  result.ids = newSeqOfCap[uint32](n)
-  result.dists = newSeqOfCap[float64](n)
+  result.ids = newSeq[int](n)
+  result.dists = newSeq[float](n)
 
   result.update()
 
-proc update(this: Delaunator) =
-  let n = this.coords.len shl 1
+proc update(this: var Delaunator) =
+  let n = this.coords.len shr 1
 
   var
     minX = Inf
@@ -125,8 +131,9 @@ proc update(this: Delaunator) =
         i1 = i
         minDist = d
 
-  let i1x = this.coords[2 * i1]
-  let i1y = this.coords[2 * i1 + 1]
+  var
+    i1x = this.coords[2 * i1]
+    i1y = this.coords[2 * i1 + 1]
 
   # Find the third point which forms the smallest circumcircle with the first two
   var minRadius = Inf
@@ -139,8 +146,9 @@ proc update(this: Delaunator) =
       i2 = i
       minRadius = r
 
-  let i2x = this.coords[2 * i2]
-  let i2y = this.coords[2 * i2 + 1]
+  var
+    i2x = this.coords[2 * i2]
+    i2y = this.coords[2 * i2 + 1]
 
   if minRadius == Inf:
     # Order collinear points by dx (or dy if all x are identical)
@@ -154,7 +162,7 @@ proc update(this: Delaunator) =
 
     quicksort(this.ids, this.dists, 0, n - 1)
 
-    let hull = newSeqOfCap[uint32](n)
+    var hull = newSeq[int](n)
     var
       j = 0
       d0 = NegInf
@@ -167,12 +175,12 @@ proc update(this: Delaunator) =
         inc j
 
     this.hull = hull[0 .. j - 1]
-    this.triangles = newSeq[uint32]()
-    this.halfEdges = newSeq[uint32]()
+    this.triangles = newSeq[int]()
+    this.halfEdges = newSeq[int]()
     return
 
   # Swap the order of the seed points for counter-clockwise orientation
-  if orient2d(i0x, i0y, i1x, i1y, i2x, i2y):
+  if orient2d(i0x, i0y, i1x, i1y, i2x, i2y) < 0:
     let
       i = i1
       x = i1x
@@ -217,9 +225,9 @@ proc update(this: Delaunator) =
   this.hullHash[this.hashKey(i2x, i2y)] = i2
 
   this.trianglesLen = 0
-  this.addTriangle(i0, i1, i2, -1, -1, -1)
+  discard this.addTriangle(i0, i1, i2, -1, -1, -1)
 
-  var xp, yp: int
+  var xp, yp: float
   for k in 0 ..< this.ids.len:
     let
       i = this.ids[k]
@@ -314,7 +322,7 @@ proc update(this: Delaunator) =
     this.hullHash[this.hashkey(x, y)] = i
     this.hullHash[this.hashkey(this.coords[2 * e], this.coords[2 * e + 1])] = e
 
-  this.hull = newSeqOfCap[uint32](hullSize)
+  this.hull = newSeq[int](hullSize)
   var e = this.hullStart
   for i in 0 ..< hullSize:
     this.hull[i] = e
@@ -324,12 +332,12 @@ proc update(this: Delaunator) =
   this.triangles = this.triangles[0 .. this.trianglesLen]
   this.halfEdges = this.halfEdges[0 .. this.trianglesLen]
 
-proc link(this: Delaunator, a, b: int) =
+proc link(this: var Delaunator, a, b: int) =
   this.halfEdges[a] = b
   if b != -1:
     this.halfEdges[b] = a
 
-proc addTriangle(this: Delaunator, i0, i1, i2, a, b, c: int): int =
+proc addTriangle(this: var Delaunator, i0, i1, i2, a, b, c: int): int =
   ## Add a new triangle given vertex indices and adjacent half-edge ids
   result = this.trianglesLen
 
@@ -390,9 +398,9 @@ func circumcenter(ax,  ay,  bx,  by,  cx,  cy: float): Vector =
   let d = 0.5 / (dx * ey - dy * ex)
   let x = ax + (ey * bl - dy * cl) * d
   let y = ay + (dx * cl - ex * bl) * d
-  return (x, y)
+  return [x, y]
 
-func quicksort(ids: var seq[uint32], dists: var seq[float64], left, right: int) =
+func quicksort(ids: var seq[int], dists: var seq[float], left, right: int) =
   if (right - left) <= 20:
     for i in (left + 1) .. right:
       let temp = ids[i]
@@ -438,8 +446,8 @@ func swap[T: SomeNumber](arr: var seq[T], i, j: int) =
   arr[i] = arr[j]
   arr[j] = tmp
 
-proc fill[T](arr: seq[T], val: T) =
-  for i in 0 ..< arr:
+proc fill[T](arr: var seq[T], val: T) =
+  for i in 0 ..< arr.len:
     arr[i] = val
 
 func pseudoAngle(dx, dy: float): float =
@@ -453,11 +461,14 @@ func pseudoAngle(dx, dy: float): float =
 
   result /= 4
 
-func hashKey(this: Delaunator, x, y: int): int =
-  return int floor(pseudoAngle(x - this.cx, y - this.cy) * this.hashSize) mod this.hashSize
+func hashKey(this: Delaunator, x, y: float): int =
+  return int floor(
+    pseudoAngle(x - float(this.cx), y - float(this.cy)) * float(this.hashSize)
+  ) mod float(this.hashSize)
 
-proc legalize(this: Delaunator, a: int): uint32 =
+proc legalize(this: var Delaunator, val: int): int =
   var
+    a = val
     i: int
     ar: int
 
