@@ -234,10 +234,6 @@ proc update(this: var Delaunator) =
       x = this.coords[2 * i]
       y = this.coords[2 * i + 1]
 
-    # Skip seed triangle points
-    if i == i0 or i == i1 or i == i2:
-      continue
-
     # Skip near-duplicate points
     if k > 0 and abs(x - xp) <= EPSILON and abs(y - yp) <= EPSILON:
       continue
@@ -245,10 +241,13 @@ proc update(this: var Delaunator) =
     xp = x
     yp = y
 
+    # Skip seed triangle points
+    if i == i0 or i == i1 or i == i2:
+      continue
+
     # Find a visible edge on the convex hull using edge hash
-    var
-      start: int
-      key = this.hashKey(x, y)
+    var start: int
+    let key = this.hashKey(x, y)
     for j in 0 ..< this.hashSize:
       start = this.hullHash[(key + j) mod this.hashSize]
       if start != -1 and start != this.hullNext[start]:
@@ -258,7 +257,7 @@ proc update(this: var Delaunator) =
 
     var
       e = start
-      q = this.hullNext[e]
+      q: int
 
     while true:
       q = this.hullNext[e]
@@ -290,7 +289,7 @@ proc update(this: var Delaunator) =
       q = this.hullNext[n]
       if orient2d(x, y, this.coords[2 * n], this.coords[2 * n + 1], this.coords[2 * q], this.coords[2 * q + 1]) >= 0:
         break
-      
+
       t = this.addTriangle(n, i, q, this.hullTri[i], -1, this.hullTri[n])
       this.hullTri[i] = this.legalize(t + 2)
       # Mark as removed
@@ -316,6 +315,10 @@ proc update(this: var Delaunator) =
     # Update the hull indices
     this.hullStart = e
     this.hullPrev[i] = e
+
+    this.hullNext[e] = i
+    this.hullPrev[n] = i
+
     this.hullNext[i] = n
 
     # Save the two new edges in the hash table

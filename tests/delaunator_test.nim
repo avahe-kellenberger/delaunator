@@ -12,12 +12,13 @@ describe "Delaunator":
 proc validate(coords: seq[float]) =
   let d = newDelaunator(coords)
   # Validate halfEdges
-  echo d.halfEdges.len
   for i in 0 ..< d.halfEdges.len:
-    # TODO: Seems like the last half edge is wrong!
+    # if d.halfEdges[i] != -1 and d.halfEdges[d.halfEdges[i]] != i:
     if d.halfEdges[i] != -1 and d.halfEdges[d.halfEdges[i]] != i:
-      echo $i
-      echo $d.halfEdges[i]
-      echo $d.halfEdges[d.halfEdges[i]]
-      break
+      echo "Wrong: "
+      echo "i: " & $i
+      echo "halfEdges[i]: " & $d.halfEdges[i]
+      echo "halfEdges[halfEdges[i]]: " & $d.halfEdges[d.halfEdges[i]]
+      echo ""
+
 
